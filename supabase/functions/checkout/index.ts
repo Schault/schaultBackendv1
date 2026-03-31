@@ -21,7 +21,6 @@ interface UserError {
 }
 
 // CORS helpers
-
 const ALLOWED_ORIGIN =
   Deno.env.get("ALLOWED_ORIGIN") ?? "http://localhost:3000";
 
@@ -44,10 +43,10 @@ function jsonResponse(
 }
 
 // ── Database connection (shared across invocations) ─────────────────
-// EF-1: Moved outside the handler so connections are reused in long-lived
+// Moved outside the handler so connections are reused in long-lived
 // Deno workers instead of creating a new TCP connection per request.
 const databaseUrl: string | undefined = Deno.env.get("APP_DB_URL") ?? Deno.env.get("SUPABASE_DB_URL");
-// EF-3: Connection timeouts to prevent hanging on deadlocks or network issues.
+// Connection timeouts to prevent hanging on deadlocks or network issues.
 const sql = databaseUrl
   ? postgres(databaseUrl, {
       max: 1,
@@ -56,8 +55,6 @@ const sql = databaseUrl
       max_lifetime: 60,
     })
   : null;
-
-//Handler 
 
 // @ts-ignore
 Deno.serve(async (req: Request) => {
@@ -86,7 +83,7 @@ Deno.serve(async (req: Request) => {
   }
   const shippingAddress = (requestBody as any).shipping_address || null;
 
-  // ── Shipping address validation (CRIT-4 fix + EF-4 fix) ───────────
+  // ── Shipping address validation ───────────
   interface ShippingAddress {
     full_name: string;
     line1: string;
@@ -110,7 +107,7 @@ Deno.serve(async (req: Request) => {
     return true;
   }
 
-  // EF-4: Shipping address is required — reject checkout without one.
+  // Shipping address is required — reject checkout without one.
   if (!validateShippingAddress(shippingAddress)) {
     return jsonResponse({ error: "Missing or invalid shipping address" }, 400);
   }
@@ -131,7 +128,7 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  //  1. Authenticate the user 
+  // ── 1. Authenticate the user
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
     return jsonResponse({ error: "Missing Authorization header" }, 401);
