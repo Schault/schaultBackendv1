@@ -83,7 +83,6 @@ Deno.serve(async (req: Request) => {
   }
   const shippingAddress = (requestBody as any).shipping_address || null;
 
-<<<<<<< HEAD
   // ── Shipping address validation ───────────
   interface ShippingAddress {
     full_name: string;
@@ -113,8 +112,6 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Missing or invalid shipping address" }, 400);
   }
 
-=======
->>>>>>> 5411769 (feat/added-idempotency)
   //  0. Validate Idempotency-Key header (strictly required) 
   const idempotencyKey = req.headers.get("Idempotency-Key") ?? req.headers.get("idempotency-key");
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
@@ -131,11 +128,7 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-<<<<<<< HEAD
   //  1. Authenticate the user
-=======
-  //  1. Authenticate the user 
->>>>>>> 5411769 (feat/added-idempotency)
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
     return jsonResponse({ error: "Missing Authorization header" }, 401);
@@ -215,12 +208,6 @@ Deno.serve(async (req: Request) => {
     const result = await sql.begin(
       async (tx: ReturnType<typeof postgres>) => {
         // ── Idempotency: upsert + row-level lock ──────────────────────────
-<<<<<<< HEAD
-=======
-        // INSERT … ON CONFLICT DO UPDATE acquires a row lock.
-        // If two concurrent requests hit this simultaneously, the second one
-        // blocks until the first commits or rolls back.
->>>>>>> 5411769 (feat/added-idempotency)
         const [keyRec] = await tx`
           INSERT INTO idempotency_keys (user_id, key_name)
           VALUES (${userId}, ${idempotencyKey})
@@ -229,10 +216,6 @@ Deno.serve(async (req: Request) => {
           RETURNING response_body, response_status_code
         `;
 
-<<<<<<< HEAD
-=======
-        // If a previous successful checkout was recorded, replay it immediately.
->>>>>>> 5411769 (feat/added-idempotency)
         if (keyRec.response_body !== null) {
           return {
             __idempotent_replay: true,
@@ -240,10 +223,7 @@ Deno.serve(async (req: Request) => {
             statusCode: keyRec.response_status_code,
           };
         }
-<<<<<<< HEAD
 
-=======
->>>>>>> 5411769 (feat/added-idempotency)
         // 3a. Fetch & lock cart + variants + active products 
         const cartRows: CartRow[] = await tx`
           SELECT

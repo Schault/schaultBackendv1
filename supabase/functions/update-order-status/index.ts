@@ -24,6 +24,7 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
 
+
 // @ts-ignore
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
