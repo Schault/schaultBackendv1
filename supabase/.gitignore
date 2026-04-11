@@ -8,8 +8,12 @@
 .env.*.local
 
 # Markdown files
+<<<<<<< HEAD
 *.md
 *.txt
 
 # Code Review Graph
 .code-review-graph
+=======
+*.md
+>>>>>>> 5411769 (feat/added-idempotency)

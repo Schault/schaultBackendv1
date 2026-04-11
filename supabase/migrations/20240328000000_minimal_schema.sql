@@ -102,9 +102,12 @@ CREATE POLICY "Users view own order items" ON order_items FOR SELECT USING (
   EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.user_id = (select auth.uid()))
 );
 
+<<<<<<< HEAD
 -- INSERT is intentionally omitted — order items are created exclusively by the
 -- checkout edge function via a direct postgres connection (bypasses RLS).
 
+=======
+>>>>>>> 5411769 (feat/added-idempotency)
 -- PERFORMANCE INDEXES
 CREATE INDEX IF NOT EXISTS idx_cart_items_variant_id ON cart_items(variant_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
