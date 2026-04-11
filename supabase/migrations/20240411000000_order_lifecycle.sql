@@ -36,7 +36,7 @@ BEGIN
   NEW.updated_at = now();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 DROP TRIGGER IF EXISTS orders_updated_at_trigger ON orders;
 CREATE TRIGGER orders_updated_at_trigger
@@ -53,7 +53,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 DROP TRIGGER IF EXISTS order_status_change_trigger ON orders;
 CREATE TRIGGER order_status_change_trigger

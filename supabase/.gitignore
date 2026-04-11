@@ -7,5 +7,5 @@
 .env.local
 .env.*.local
 
-# Code Review Graph
-.code-review-graph
+# Markdown files
+*.md

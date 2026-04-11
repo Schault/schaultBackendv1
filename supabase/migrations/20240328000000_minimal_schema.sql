@@ -13,7 +13,7 @@ BEGIN
   VALUES (new.id, new.raw_user_meta_data->>'full_name');
   RETURN new;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
@@ -103,3 +103,8 @@ CREATE POLICY "Users view own order items" ON order_items FOR SELECT USING (
 CREATE POLICY "Users create order items" ON order_items FOR INSERT WITH CHECK (
   EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid())
 );
+
+-- PERFORMANCE INDEXES
+CREATE INDEX IF NOT EXISTS idx_cart_items_variant_id ON cart_items(variant_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_variant_id ON order_items(variant_id);

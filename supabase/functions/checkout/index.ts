@@ -28,7 +28,7 @@ const ALLOWED_ORIGIN =
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, idempotency-key",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   Vary: "Origin",
 };
@@ -72,6 +72,22 @@ Deno.serve(async (req: Request) => {
   }
   const shippingAddress = (requestBody as any).shipping_address || null;
 
+  //  0. Validate Idempotency-Key header (strictly required) 
+  const idempotencyKey = req.headers.get("Idempotency-Key") ?? req.headers.get("idempotency-key");
+  if (!idempotencyKey || idempotencyKey.trim().length === 0) {
+    return jsonResponse(
+      { error: "Missing required Idempotency-Key header" },
+      400,
+    );
+  }
+  // Basic length sanity check – a UUID is 36 chars; allow up to 128 for flexibility
+  if (idempotencyKey.length > 128) {
+    return jsonResponse(
+      { error: "Idempotency-Key header too long (max 128 characters)" },
+      400,
+    );
+  }
+
   //  1. Authenticate the user 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
@@ -111,6 +127,26 @@ Deno.serve(async (req: Request) => {
     //  3. Execute checkout in a single transaction 
     const result = await sql.begin(
       async (tx: ReturnType<typeof postgres>) => {
+        // ── Idempotency: upsert + row-level lock ──────────────────────────
+        // INSERT … ON CONFLICT DO UPDATE acquires a row lock.
+        // If two concurrent requests hit this simultaneously, the second one
+        // blocks until the first commits or rolls back.
+        const [keyRec] = await tx`
+          INSERT INTO idempotency_keys (user_id, key_name)
+          VALUES (${userId}, ${idempotencyKey})
+          ON CONFLICT (user_id, key_name)
+          DO UPDATE SET locked_at = now()
+          RETURNING response_body, response_status_code
+        `;
+
+        // If a previous successful checkout was recorded, replay it immediately.
+        if (keyRec.response_body !== null) {
+          return {
+            __idempotent_replay: true,
+            body: keyRec.response_body,
+            statusCode: keyRec.response_status_code,
+          };
+        }
         // 3a. Fetch & lock cart + variants + active products 
         const cartRows: CartRow[] = await tx`
           SELECT
@@ -232,9 +268,38 @@ Deno.serve(async (req: Request) => {
           DELETE FROM cart_items WHERE id IN ${tx(cartItemIds)}
         `;
 
+        // ── Idempotency: persist the successful response ────────────────
+        const successBody = {
+          message: "Order placed successfully",
+          order_id: orderId,
+          total,
+          estimated_delivery: estimatedDelivery,
+        };
+        await tx`
+          UPDATE idempotency_keys
+          SET response_body = ${JSON.stringify(successBody)}::jsonb,
+              response_status_code = 200,
+              completed_at = now()
+          WHERE user_id = ${userId}
+            AND key_name = ${idempotencyKey}
+        `;
+
         return { orderId, total, estimatedDelivery, itemCount: cartRows.length };
       },
     );
+
+    // ── Handle idempotent replay (already-completed checkout) ─────────
+    if (result.__idempotent_replay) {
+      console.log(
+        JSON.stringify({
+          event: "checkout_idempotent_replay",
+          userId,
+          idempotencyKey,
+          ts: new Date().toISOString(),
+        }),
+      );
+      return jsonResponse(result.body as Record<string, unknown>, result.statusCode as number);
+    }
 
     //4. Success logging 
     console.log(
