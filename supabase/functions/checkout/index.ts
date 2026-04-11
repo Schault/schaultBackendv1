@@ -72,6 +72,34 @@ Deno.serve(async (req: Request) => {
   }
   const shippingAddress = (requestBody as any).shipping_address || null;
 
+  // ── Shipping address validation (CRIT-4 fix) ──────────────────────
+  interface ShippingAddress {
+    full_name: string;
+    line1: string;
+    line2?: string;
+    city: string;
+    state: string;
+    postal_code: string;
+    phone?: string;
+  }
+
+  function validateShippingAddress(addr: unknown): addr is ShippingAddress {
+    if (!addr || typeof addr !== 'object') return false;
+    const a = addr as Record<string, unknown>;
+    if (typeof a.full_name !== 'string' || a.full_name.length < 1 || a.full_name.length > 200) return false;
+    if (typeof a.line1 !== 'string' || a.line1.length < 1 || a.line1.length > 500) return false;
+    if (a.line2 !== undefined && (typeof a.line2 !== 'string' || a.line2.length > 500)) return false;
+    if (typeof a.city !== 'string' || a.city.length < 1 || a.city.length > 100) return false;
+    if (typeof a.state !== 'string' || a.state.length < 1 || a.state.length > 100) return false;
+    if (typeof a.postal_code !== 'string' || !/^\d{5,6}$/.test(a.postal_code)) return false;
+    if (a.phone !== undefined && (typeof a.phone !== 'string' || a.phone.length > 20)) return false;
+    return true;
+  }
+
+  if (shippingAddress !== null && !validateShippingAddress(shippingAddress)) {
+    return jsonResponse({ error: "Invalid shipping address" }, 400);
+  }
+
   //  0. Validate Idempotency-Key header (strictly required) 
   const idempotencyKey = req.headers.get("Idempotency-Key") ?? req.headers.get("idempotency-key");
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {

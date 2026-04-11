@@ -92,17 +92,17 @@ CREATE POLICY "Anyone can view variants" ON product_variants FOR SELECT USING (t
 -- Cart: Users can only see, add, update, delete their own cart items
 CREATE POLICY "Users manage own cart" ON cart_items FOR ALL USING (auth.uid() = user_id);
 
--- Orders: Users can only view and create their own orders
+-- Orders: Users can only view their own orders.
+-- INSERT is intentionally omitted — orders are created exclusively by the checkout
+-- edge function via a direct postgres connection (bypasses RLS).
 CREATE POLICY "Users view own orders" ON orders FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users create own orders" ON orders FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 -- Order Items: Users can view items if they own the parent order
 CREATE POLICY "Users view own order items" ON order_items FOR SELECT USING (
   EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid())
 );
-CREATE POLICY "Users create order items" ON order_items FOR INSERT WITH CHECK (
-  EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid())
-);
+-- INSERT is intentionally omitted — order items are created exclusively by the
+-- checkout edge function via a direct postgres connection (bypasses RLS).
 
 -- PERFORMANCE INDEXES
 CREATE INDEX IF NOT EXISTS idx_cart_items_variant_id ON cart_items(variant_id);
