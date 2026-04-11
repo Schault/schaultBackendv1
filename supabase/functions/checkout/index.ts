@@ -128,7 +128,7 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // ── 1. Authenticate the user
+  //  1. Authenticate the user
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
     return jsonResponse({ error: "Missing Authorization header" }, 401);
@@ -159,14 +159,55 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Server misconfiguration" }, 500);
   }
 
+  //  2a. Rate limiting — enforce per-user checkout throttle 
+  try {
+    const [rateCheck] = await sql`
+      SELECT check_checkout_rate_limit(${userId}) AS result
+    `;
+    const rateResult = rateCheck.result;
+    if (!rateResult.allowed) {
+      console.log(
+        JSON.stringify({
+          event: "checkout_rate_limited",
+          userId,
+          retryAfterSeconds: rateResult.retry_after_seconds,
+          ts: new Date().toISOString(),
+        }),
+      );
+      return new Response(
+        JSON.stringify({
+          error: "Too many checkout attempts. Please try again later.",
+          retry_after_seconds: rateResult.retry_after_seconds,
+        }),
+        {
+          status: 429,
+          headers: {
+            ...CORS_HEADERS,
+            "Content-Type": "application/json",
+            "Retry-After": String(rateResult.retry_after_seconds),
+          },
+        },
+      );
+    }
+  } catch (rateLimitErr) {
+    // Fail CLOSED. Attackers must not be able to bypass rate limiting
+    // by triggering deliberate database errors.
+    console.error(
+      JSON.stringify({
+        event: "rate_limit_check_error",
+        userId,
+        error: rateLimitErr instanceof Error ? rateLimitErr.message : String(rateLimitErr),
+        ts: new Date().toISOString(),
+      }),
+    );
+    return jsonResponse({ error: "Internal server error during checkout verification" }, 500);
+  }
+
   try {
     //  3. Execute checkout in a single transaction 
     const result = await sql.begin(
       async (tx: ReturnType<typeof postgres>) => {
         // ── Idempotency: upsert + row-level lock ──────────────────────────
-        // INSERT … ON CONFLICT DO UPDATE acquires a row lock.
-        // If two concurrent requests hit this simultaneously, the second one
-        // blocks until the first commits or rolls back.
         const [keyRec] = await tx`
           INSERT INTO idempotency_keys (user_id, key_name)
           VALUES (${userId}, ${idempotencyKey})
@@ -175,7 +216,6 @@ Deno.serve(async (req: Request) => {
           RETURNING response_body, response_status_code
         `;
 
-        // If a previous successful checkout was recorded, replay it immediately.
         if (keyRec.response_body !== null) {
           return {
             __idempotent_replay: true,
@@ -183,6 +223,7 @@ Deno.serve(async (req: Request) => {
             statusCode: keyRec.response_status_code,
           };
         }
+
         // 3a. Fetch & lock cart + variants + active products 
         const cartRows: CartRow[] = await tx`
           SELECT
@@ -226,7 +267,6 @@ Deno.serve(async (req: Request) => {
         }
 
         // 3c. Compute total in SQL (exact numeric arithmetic) 
-        // We already have the rows locked, so recompute from the same snapshot
         const [{ total: computedTotal }] = await tx`
           SELECT COALESCE(SUM(p.base_price * ci.quantity), 0)::numeric(10,2) AS total
           FROM cart_items ci
@@ -239,37 +279,35 @@ Deno.serve(async (req: Request) => {
 
         // 3d. Create order 
         const [order] = await tx`
-          INSERT INTO orders (user_id, status, total, estimated_delivery, shipping_address, item_count)
-          VALUES (${userId}, 'confirmed', ${total}, now() + interval '7 days', ${shippingAddress ? JSON.stringify(shippingAddress) : null}::jsonb, ${cartRows.length})
+          INSERT INTO orders (user_id, status, total, estimated_delivery, shipping_address)
+          VALUES (${userId}, 'confirmed', ${total}, now() + interval '7 days', ${shippingAddress ? JSON.stringify(shippingAddress) : null}::jsonb)
           RETURNING id, estimated_delivery
         `;
         const orderId: string = order.id;
         const estimatedDelivery: string = order.estimated_delivery;
 
         await tx`
-          INSERT INTO order_status_history (order_id, user_id, status, note)
-          VALUES (${orderId}, ${userId}, 'confirmed', 'Order placed and payment confirmed')
+          INSERT INTO order_status_history (order_id, status, note)
+          VALUES (${orderId}, 'confirmed', 'Order placed and payment confirmed')
         `;
 
         // 3e. Insert order items (single bulk insert)
-        // line_total is a GENERATED ALWAYS column — the DB computes it
-        // from (unit_price * quantity) using exact numeric arithmetic.
         const orderItemsData = cartRows.map((row: CartRow) => ({
           order_id: orderId,
-          user_id: userId,
           variant_id: row.variant_id,
           unit_price: Number(row.base_price),
           quantity: row.requested_qty,
+          line_total: Math.round(Number(row.base_price) * row.requested_qty * 100) / 100,
         }));
 
         await tx`
           INSERT INTO order_items ${tx(
             orderItemsData,
             "order_id",
-            "user_id",
             "variant_id",
             "unit_price",
             "quantity",
+            "line_total"
           )}
         `;
 
@@ -290,8 +328,6 @@ Deno.serve(async (req: Request) => {
         `;
 
         if (updated.length !== cartRows.length) {
-          // This should never happen because we validated above with locks held,
-          // but defense-in-depth demands we check.
           throw {
             userError: true,
             status: 409,
@@ -357,7 +393,6 @@ Deno.serve(async (req: Request) => {
       estimated_delivery: result.estimatedDelivery,
     });
   } catch (err) {
-    //User-facing errors (stock, empty cart, etc.) 
     if (
       typeof err === "object" &&
       err !== null &&
@@ -370,7 +405,6 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    //Unexpected errors — log detail, return generic message
     console.error(
       JSON.stringify({
         event: "checkout_error",

@@ -69,7 +69,7 @@ CREATE POLICY "Users view own order history" ON order_status_history
     EXISTS (
       SELECT 1 FROM orders
       WHERE orders.id = order_status_history.order_id
-        AND orders.user_id = auth.uid()
+        AND orders.user_id = (select auth.uid())
     )
   );
 
