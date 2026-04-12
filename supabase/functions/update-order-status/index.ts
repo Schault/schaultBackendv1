@@ -24,16 +24,6 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
 
-const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-  pending: ['confirmed', 'cancelled'],
-  confirmed: ['processing', 'cancelled'],
-  processing: ['shipped', 'cancelled'],
-  shipped: ['out_for_delivery', 'cancelled'],
-  out_for_delivery: ['delivered', 'cancelled'],
-  delivered: [],
-  cancelled: []
-};
-
 // @ts-ignore
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -61,64 +51,54 @@ Deno.serve(async (req: Request) => {
     // Must use service role key for admin operations
     const authHeader = req.headers.get("Authorization");
     // @ts-ignore
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!authHeader){
+      return jsonResponse({ error: "Missing auth header" }, 401);
+    }
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      {
+        global: { headers: { Authorization: authHeader } },
+      }
+    );
+
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
     
-    if (!authHeader || authHeader.replace("Bearer ", "") !== serviceRoleKey) {
-        return jsonResponse({ error: "Unauthorized. Admin only." }, 401);
+    if (error || !user) {
+      return jsonResponse({ error: "Invalid Token" }, 401);
     }
 
-    // @ts-ignore
-    const supabaseUrl: string = Deno.env.get("SUPABASE_URL")!;
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
-
-    // Get current status
-    const { data: order, error: fetchError } = await supabase
-      .from('orders')
-      .select('status')
-      .eq('id', order_id)
-      .single();
-
-    if (fetchError || !order) {
-      return jsonResponse({ error: "Order not found" }, 404);
+    const role = user.app_metadata?.role;
+    if (role !== "admin") {
+      return jsonResponse({ error: "Forbidden: Admins only" }, 403);
     }
 
-    const currentStatus = order.status;
+    // INT-1 + INT-5 fix: Call the atomic database function instead of
+    // doing separate read → validate → write → fetch → update operations.
+    // The DB function uses SELECT ... FOR UPDATE to prevent race conditions
+    // and handles the note update atomically within the same transaction.
+    const { data, error: rpcError } = await supabase.rpc('transition_order_status', {
+      p_order_id: order_id,
+      p_new_status: new_status,
+      p_note: note ?? null,
+    });
 
-    // Validate transition
-    if (!ALLOWED_TRANSITIONS[currentStatus]?.includes(new_status)) {
-      return jsonResponse({ 
-        error: `Invalid transition from ${currentStatus} to ${new_status}` 
-      }, 400);
+    if (rpcError) {
+      throw rpcError;
     }
 
-    // Update order status (the trigger will handle history insertion)
-    const { error: updateError } = await supabase
-      .from('orders')
-      .update({ status: new_status })
-      .eq('id', order_id);
-
-    if (updateError) {
-      throw updateError;
-    }
-
-    // Optional: add note to history
-    if (note) {
-        // Wait for the trigger to have fired, then update the most recent history row
-        const { data: historyRow } = await supabase
-            .from('order_status_history')
-            .select('id')
-            .eq('order_id', order_id)
-            .eq('status', new_status)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-            
-        if (historyRow) {
-            await supabase
-                .from('order_status_history')
-                .update({ note })
-                .eq('id', historyRow.id);
-        }
+    // The function returns a JSON object with either { error: "..." } or { status: "ok", ... }
+    if (data.error) {
+      // Map known errors to appropriate HTTP status codes
+      if (data.error === 'Order not found') {
+        return jsonResponse({ error: data.error }, 404);
+      }
+      // Invalid transition
+      return jsonResponse({ error: data.error }, 400);
     }
 
     return jsonResponse({ message: "Status updated successfully" });

@@ -43,6 +43,20 @@ function jsonResponse(
   });
 }
 
+// ── Database connection (shared across invocations) ─────────────────
+// EF-1: Moved outside the handler so connections are reused in long-lived
+// Deno workers instead of creating a new TCP connection per request.
+const databaseUrl: string | undefined = Deno.env.get("APP_DB_URL") ?? Deno.env.get("SUPABASE_DB_URL");
+// EF-3: Connection timeouts to prevent hanging on deadlocks or network issues.
+const sql = databaseUrl
+  ? postgres(databaseUrl, {
+      max: 1,
+      idle_timeout: 10,
+      connect_timeout: 5,
+      max_lifetime: 60,
+    })
+  : null;
+
 //Handler 
 
 // @ts-ignore
@@ -72,7 +86,7 @@ Deno.serve(async (req: Request) => {
   }
   const shippingAddress = (requestBody as any).shipping_address || null;
 
-  // ── Shipping address validation (CRIT-4 fix) ──────────────────────
+  // ── Shipping address validation (CRIT-4 fix + EF-4 fix) ───────────
   interface ShippingAddress {
     full_name: string;
     line1: string;
@@ -96,8 +110,9 @@ Deno.serve(async (req: Request) => {
     return true;
   }
 
-  if (shippingAddress !== null && !validateShippingAddress(shippingAddress)) {
-    return jsonResponse({ error: "Invalid shipping address" }, 400);
+  // EF-4: Shipping address is required — reject checkout without one.
+  if (!validateShippingAddress(shippingAddress)) {
+    return jsonResponse({ error: "Missing or invalid shipping address" }, 400);
   }
 
   //  0. Validate Idempotency-Key header (strictly required) 
@@ -141,15 +156,11 @@ Deno.serve(async (req: Request) => {
 
   const userId: string = user.id;
 
-  //  2. Acquire database connection 
-  const databaseUrl: string | undefined = Deno.env.get("APP_DB_URL") ?? Deno.env.get("SUPABASE_DB_URL");
-
-  if (!databaseUrl) {
+  //  2. Verify database connection is available 
+  if (!sql) {
     console.error("FATAL: No database URL configured");
     return jsonResponse({ error: "Server misconfiguration" }, 500);
   }
-
-  const sql = postgres(databaseUrl, { max: 1 });
 
   try {
     //  3. Execute checkout in a single transaction 
@@ -231,36 +242,37 @@ Deno.serve(async (req: Request) => {
 
         // 3d. Create order 
         const [order] = await tx`
-          INSERT INTO orders (user_id, status, total, estimated_delivery, shipping_address)
-          VALUES (${userId}, 'confirmed', ${total}, now() + interval '7 days', ${shippingAddress ? JSON.stringify(shippingAddress) : null}::jsonb)
+          INSERT INTO orders (user_id, status, total, estimated_delivery, shipping_address, item_count)
+          VALUES (${userId}, 'confirmed', ${total}, now() + interval '7 days', ${shippingAddress ? JSON.stringify(shippingAddress) : null}::jsonb, ${cartRows.length})
           RETURNING id, estimated_delivery
         `;
         const orderId: string = order.id;
         const estimatedDelivery: string = order.estimated_delivery;
 
         await tx`
-          INSERT INTO order_status_history (order_id, status, note)
-          VALUES (${orderId}, 'confirmed', 'Order placed and payment confirmed')
+          INSERT INTO order_status_history (order_id, user_id, status, note)
+          VALUES (${orderId}, ${userId}, 'confirmed', 'Order placed and payment confirmed')
         `;
 
-        // 3e. Insert order items (single bulk insert, computed in SQL)
+        // 3e. Insert order items (single bulk insert)
+        // line_total is a GENERATED ALWAYS column — the DB computes it
+        // from (unit_price * quantity) using exact numeric arithmetic.
         const orderItemsData = cartRows.map((row: CartRow) => ({
           order_id: orderId,
+          user_id: userId,
           variant_id: row.variant_id,
           unit_price: Number(row.base_price),
           quantity: row.requested_qty,
-          line_total:
-            Math.round(Number(row.base_price) * row.requested_qty * 100) / 100,
         }));
 
         await tx`
           INSERT INTO order_items ${tx(
             orderItemsData,
             "order_id",
+            "user_id",
             "variant_id",
             "unit_price",
             "quantity",
-            "line_total",
           )}
         `;
 
@@ -372,7 +384,5 @@ Deno.serve(async (req: Request) => {
       }),
     );
     return jsonResponse({ error: "Internal server error" }, 500);
-  } finally {
-    await sql.end();
   }
 });
