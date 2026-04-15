@@ -1,0 +1,1 @@
+-- File cleaned: Removed test SQL and hardcoded admin mutations.
