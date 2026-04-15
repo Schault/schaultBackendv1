@@ -1,10 +1,10 @@
 -- is_admin() helper function
 CREATE OR REPLACE FUNCTION is_admin() RETURNS boolean AS $$
   SELECT EXISTS (
-    SELECT 1 FROM profiles 
-    WHERE id = auth.uid() AND role = 'admin'
+    SELECT 1 FROM public.profiles 
+    WHERE id = (select auth.uid()) AND role = 'admin'
   );
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+$$ LANGUAGE sql SECURITY DEFINER STABLE SET search_path = public;
 
 -- Admin policies for products
 CREATE POLICY "Admin can insert products" ON products FOR INSERT WITH CHECK (is_admin());

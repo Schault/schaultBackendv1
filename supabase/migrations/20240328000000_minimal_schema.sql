@@ -82,25 +82,26 @@ ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
 
 -- Profiles: Users can only see and edit their own profile
-CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING ((select auth.uid()) = id);
+CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING ((select auth.uid()) = id);
 
 -- Products & Variants: Publicly readable, writeable only via dashboard (no policy = secure by default)
 CREATE POLICY "Anyone can view active products" ON products FOR SELECT USING (is_active = true);
 CREATE POLICY "Anyone can view variants" ON product_variants FOR SELECT USING (true);
 
 -- Cart: Users can only see, add, update, delete their own cart items
-CREATE POLICY "Users manage own cart" ON cart_items FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users manage own cart" ON cart_items FOR ALL USING ((select auth.uid()) = user_id);
 
 -- Orders: Users can only view their own orders.
 -- INSERT is intentionally omitted — orders are created exclusively by the checkout
 -- edge function via a direct postgres connection (bypasses RLS).
-CREATE POLICY "Users view own orders" ON orders FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users view own orders" ON orders FOR SELECT USING ((select auth.uid()) = user_id);
 
 -- Order Items: Users can view items if they own the parent order
 CREATE POLICY "Users view own order items" ON order_items FOR SELECT USING (
-  EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid())
+  EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.user_id = (select auth.uid()))
 );
+
 -- INSERT is intentionally omitted — order items are created exclusively by the
 -- checkout edge function via a direct postgres connection (bypasses RLS).
 
