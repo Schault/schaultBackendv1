@@ -37,6 +37,10 @@ DECLARE
   v_oldest_in_window timestamptz;
   v_retry_after int;
 BEGIN
+  -- Obtain an exclusive lock for this user's rate limit check to prevent concurrent bypasses
+  -- The lock is automatically released at the end of the transaction (function execution).
+  PERFORM pg_advisory_xact_lock(hashtext('checkout_rate_limit_' || p_user_id::text));
+
   v_window_start := now() - (p_window_minutes || ' minutes')::interval;
 
   -- Count attempts within the sliding window
