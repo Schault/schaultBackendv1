@@ -17,7 +17,9 @@ CREATE POLICY "Users can update own profile" ON profiles
 -- CART_ITEMS
 DROP POLICY IF EXISTS "Users manage own cart" ON cart_items;
 CREATE POLICY "Users manage own cart" ON cart_items
-  FOR ALL USING ((select auth.uid()) = user_id);
+  FOR ALL
+  USING ((select auth.uid()) = user_id)
+  WITH CHECK ((select auth.uid()) = user_id);
 
 -- ORDERS
 DROP POLICY IF EXISTS "Users view own orders" ON orders;

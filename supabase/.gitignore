@@ -10,3 +10,6 @@
 # Markdown files
 *.md
 *.txt
+
+# Code Review Graph
+.code-review-graph

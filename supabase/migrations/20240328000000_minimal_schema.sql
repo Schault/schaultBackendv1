@@ -104,7 +104,6 @@ CREATE POLICY "Users view own order items" ON order_items FOR SELECT USING (
 
 -- INSERT is intentionally omitted — order items are created exclusively by the
 -- checkout edge function via a direct postgres connection (bypasses RLS).
-
 -- PERFORMANCE INDEXES
 CREATE INDEX IF NOT EXISTS idx_cart_items_variant_id ON cart_items(variant_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
