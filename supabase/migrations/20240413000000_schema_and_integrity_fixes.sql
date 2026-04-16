@@ -212,8 +212,16 @@ ALTER TABLE order_items
 
 -- SCHEMA-4: Restrict profile roles + prevent self-escalation
 
-ALTER TABLE profiles
-  ADD CONSTRAINT profiles_role_check CHECK (role IN ('customer', 'admin'));
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint 
+    WHERE conname = 'profiles_role_check'
+  ) THEN
+    ALTER TABLE profiles
+    ADD CONSTRAINT profiles_role_check CHECK (role IN ('customer', 'admin'));
+  END IF;
+END $$;
 
 DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 CREATE POLICY "Users can update own profile" ON profiles
