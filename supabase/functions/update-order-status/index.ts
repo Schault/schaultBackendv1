@@ -1,6 +1,6 @@
 /// <reference lib="deno.ns" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 // CORS helpers — restricted origin (CRIT-1 fix)
 const ALLOWED_ORIGIN =

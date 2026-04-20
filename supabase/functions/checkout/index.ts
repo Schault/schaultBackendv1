@@ -1,7 +1,7 @@
 /// <reference lib="deno.ns" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import postgres from "https://deno.land/x/postgresjs@v3.4.5/mod.js";
+import { createClient } from "npm:@supabase/supabase-js@2";
+import postgres from "npm:postgres@3.4.5";
 
 //Types
 interface CartRow {
