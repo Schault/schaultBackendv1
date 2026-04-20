@@ -287,17 +287,17 @@ Deno.serve(async (req: Request) => {
         const estimatedDelivery: string = order.estimated_delivery;
 
         await tx`
-          INSERT INTO order_status_history (order_id, status, note)
-          VALUES (${orderId}, 'confirmed', 'Order placed and payment confirmed')
+          INSERT INTO order_status_history (order_id, user_id, status, note)
+          VALUES (${orderId}, ${userId}, 'confirmed', 'Order placed and payment confirmed')
         `;
 
         // 3e. Insert order items (single bulk insert)
         const orderItemsData = cartRows.map((row: CartRow) => ({
           order_id: orderId,
           variant_id: row.variant_id,
+          user_id: userId,
           unit_price: Number(row.base_price),
           quantity: row.requested_qty,
-          line_total: Math.round(Number(row.base_price) * row.requested_qty * 100) / 100,
         }));
 
         await tx`
@@ -305,9 +305,9 @@ Deno.serve(async (req: Request) => {
             orderItemsData,
             "order_id",
             "variant_id",
+            "user_id",
             "unit_price",
-            "quantity",
-            "line_total"
+            "quantity"
           )}
         `;
 
