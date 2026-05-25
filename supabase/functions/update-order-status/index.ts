@@ -74,7 +74,20 @@ Deno.serve(async (req: Request) => {
 
     const role = user.app_metadata?.role;
     if (role !== "admin") {
-      return jsonResponse({ error: "Forbidden: Admins only" }, 403);
+      // Fallback: check profiles table directly in case app_metadata is out of sync
+      const adminClient = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      );
+      const { data: profile } = await adminClient
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (profile?.role !== "admin") {
+        return jsonResponse({ error: "Forbidden: Admins only" }, 403);
+      }
     }
 
     // INT-1 + INT-5 fix: Call the atomic database function instead of

@@ -292,8 +292,10 @@ Deno.serve(async (req: Request) => {
         `;
 
         // 3e. Insert order items (single bulk insert)
+        // Note: line_total is a GENERATED ALWAYS column — do not insert it explicitly.
         const orderItemsData = cartRows.map((row: CartRow) => ({
           order_id: orderId,
+          user_id: userId,
           variant_id: row.variant_id,
           user_id: userId,
           unit_price: Number(row.base_price),
@@ -304,6 +306,7 @@ Deno.serve(async (req: Request) => {
           INSERT INTO order_items ${tx(
             orderItemsData,
             "order_id",
+            "user_id",
             "variant_id",
             "user_id",
             "unit_price",
